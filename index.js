@@ -16,6 +16,11 @@ const PRINTER_CHARACTERISTIC = '49535343-8841-43f4-a8d4-ecbe34729bb3'; // Cat Pr
 const ESC = 0x1B;
 const GS = 0x1D;
 const FS = 0x1C;
+const DLE = 0x10;
+const EOT = 0x04;
+const ENQ = 0x05;
+const STATUS_COMMAND = [DLE, EOT, 0x01]; // Request printer status
+const PAPER_OUT = 0x08; // Paper out bit in status response
 
 // Basic commands
 const INIT = [ESC, 0x40]; // Initialize printer
@@ -38,6 +43,7 @@ class PrinterService {
   constructor() {
     this.connectedDevice = null;
     this.writeCharacteristic = null;
+    this.readCharacteristic = null;
     this.isConnected = false;
     this.printQueue = [];
     this.isProcessingQueue = false;
@@ -158,6 +164,22 @@ class PrinterService {
 
       console.log('Found write characteristic:', this.writeCharacteristic.uuid);
 
+      // Look for read characteristic, but don't fail if not found
+      this.readCharacteristic = characteristics.find(c => 
+        c.properties.includes('read') || 
+        c.properties.includes('notify')
+      );
+
+      if (this.readCharacteristic) {
+        console.log('Found read characteristic:', this.readCharacteristic.uuid);
+        // Enable notifications if available
+        if (this.readCharacteristic.properties.includes('notify')) {
+          await this.readCharacteristic.subscribeAsync();
+        }
+      } else {
+        console.log('No read characteristic found - status checking will be limited');
+      }
+
       // Initialize printer
       await this.writeToPrinter(INIT);
       await this.writeToPrinter(CHAR_CODE_TABLE);
@@ -182,8 +204,13 @@ class PrinterService {
 
     console.log(`Writing ${chunks.length} chunks to printer`);
     for (const chunk of chunks) {
-      await this.writeCharacteristic.writeAsync(chunk, false);
-      await new Promise(resolve => setTimeout(resolve, 50)); // 50ms delay between chunks
+      try {
+        await this.writeCharacteristic.writeAsync(chunk, false);
+        await new Promise(resolve => setTimeout(resolve, 50)); // 50ms delay between chunks
+      } catch (error) {
+        console.error('Error writing to printer:', error);
+        throw new Error('Printer is out of paper or not ready');
+      }
     }
   }
 
@@ -209,11 +236,19 @@ class PrinterService {
         
         try {
           const result = await job();
+          if (!result) {
+            throw new Error('Print job failed');
+          }
           console.log('Job completed successfully');
           resolve(result);
         } catch (error) {
           console.error('Job failed:', error);
           reject(error);
+          // Don't continue processing the queue if we hit a paper-out error
+          if (error.message.includes('out of paper') || error.message.includes('not ready')) {
+            console.log('Stopping queue processing due to printer error');
+            break;
+          }
         }
         
         this.printQueue.shift(); // Remove the completed job
@@ -247,6 +282,31 @@ class PrinterService {
     });
   }
 
+  async checkPrinterStatus() {
+    if (!this.writeCharacteristic) {
+      throw new Error('Printer not connected');
+    }
+
+    try {
+      // Send a test print command
+      await this.writeToPrinter([0x1B, 0x40]); // Initialize
+      await this.writeToPrinter([0x1B, 0x74, 0x00]); // Set character code table
+      
+      // Try to print a single character
+      await this.writeToPrinter(Buffer.from(' ', 'utf8'));
+      
+      // Add a small delay to let the printer process
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // If we get here without an error, assume printer is ready
+      return true;
+    } catch (error) {
+      console.error('Printer status check failed:', error);
+      // If we get any error during the test print, assume paper out
+      throw new Error('Printer is out of paper or not ready');
+    }
+  }
+
   async printText(text) {
     if (!this.isConnected) {
       throw new Error('Printer not connected');
@@ -254,6 +314,9 @@ class PrinterService {
 
     return this.addToPrintQueue(async () => {
       try {
+        // Check printer status before starting
+        await this.checkPrinterStatus();
+
         console.log(`Starting to print text: ${text}`);
         await this.writeToPrinter(INIT);
         await this.writeToPrinter(CHAR_CODE_TABLE);
@@ -269,7 +332,10 @@ class PrinterService {
         return true;
       } catch (error) {
         console.error('Print error:', error);
-        return false;
+        if (error.message.includes('out of paper')) {
+          throw new Error('Cannot print: Printer is out of paper');
+        }
+        throw error; // Re-throw the error instead of returning false
       }
     });
   }
@@ -281,17 +347,20 @@ class PrinterService {
 
     return this.addToPrintQueue(async () => {
       try {
+        // Check printer status before starting
+        await this.checkPrinterStatus();
+
         console.log(`Starting to print receipt: ${title}`);
 
         // Initialize printer
         console.log('Sending initialization command...');
         await this.writeToPrinter(INIT);
-        await new Promise(resolve => setTimeout(resolve, 200)); // 200ms delay after init
+        await new Promise(resolve => setTimeout(resolve, 200));
 
         // Set character code table
         console.log('Setting character code table...');
         await this.writeToPrinter(CHAR_CODE_TABLE);
-        await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay after char table
+        await new Promise(resolve => setTimeout(resolve, 100));
 
         // Print school name if provided
         if (schoolName) {
@@ -343,13 +412,16 @@ class PrinterService {
 
         // Cut paper
         await this.writeToPrinter(CUT);
-        await new Promise(resolve => setTimeout(resolve, 200)); // 200ms delay after cut
+        await new Promise(resolve => setTimeout(resolve, 200));
 
         console.log(`Finished printing receipt: ${title}`);
         return true;
       } catch (error) {
         console.error('Receipt print error:', error);
-        return false;
+        if (error.message.includes('out of paper')) {
+          throw new Error('Cannot print: Printer is out of paper');
+        }
+        throw error; // Re-throw the error instead of returning false
       }
     });
   }
@@ -359,6 +431,7 @@ class PrinterService {
       await this.connectedDevice.disconnectAsync();
       this.connectedDevice = null;
       this.writeCharacteristic = null;
+      this.readCharacteristic = null;
       this.isConnected = false;
     }
   }
@@ -418,19 +491,31 @@ app.post('/print/receipt', async (req, res) => {
 
     // Connect if not already connected
     if (!printerService.isConnected) {
-      await printerService.connectToDevice(deviceId);
+      const connected = await printerService.connectToDevice(deviceId);
+      if (!connected) {
+        return res.status(500).json({ error: 'Failed to connect to printer' });
+      }
     }
 
-    const success = await printerService.printReceipt({ 
-      title, 
-      items, 
-      total,
-      schoolName,
-      footer,
-      saleDate
-    });
-    res.json({ success });
+    try {
+      const success = await printerService.printReceipt({ 
+        title, 
+        items, 
+        total,
+        schoolName,
+        footer,
+        saleDate
+      });
+      res.json({ success });
+    } catch (printError) {
+      console.error('Print error:', printError);
+      if (printError.message.includes('out of paper')) {
+        return res.status(503).json({ error: 'Printer is out of paper' });
+      }
+      return res.status(500).json({ error: printError.message });
+    }
   } catch (error) {
+    console.error('API error:', error);
     res.status(500).json({ error: error.message });
   }
 });
