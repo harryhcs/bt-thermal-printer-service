@@ -169,4 +169,4 @@ The project uses:
 
 ## License
 
-[Your License Here] 
+[MIT](LICENSE)

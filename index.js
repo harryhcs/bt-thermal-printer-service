@@ -12,7 +12,6 @@ app.use(express.json());
 // Printer service and characteristic UUIDs
 const PRINTER_SERVICE = '49535343fe7d4ae58fa99fafd205e455'; // Cat Printer service UUID
 const PRINTER_CHARACTERISTIC = '49535343-8841-43f4-a8d4-ecbe34729bb3'; // Cat Printer characteristic UUID
-
 // ESC/POS Commands
 const ESC = 0x1B;
 const GS = 0x1D;
