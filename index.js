@@ -5,6 +5,10 @@ import fs from 'fs/promises';
 import path from 'path';
 import cors from 'cors';
 import os from 'os';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 const app = express();
 app.use(cors()); // Enable CORS for all routes
@@ -81,9 +85,29 @@ class PrinterService {
     }
   }
 
+  async initializeBluetooth() {
+    if (process.platform === 'linux') {
+      try {
+        console.log('Initializing Bluetooth adapter...');
+        // Reset the Bluetooth adapter
+        await execAsync('sudo hciconfig hci0 reset');
+        // Set to piscan mode (page scan and inquiry scan)
+        await execAsync('sudo hciconfig hci0 piscan');
+        // Make sure the adapter is up
+        await execAsync('sudo hciconfig hci0 up');
+        console.log('Bluetooth adapter initialized');
+      } catch (error) {
+        console.error('Error initializing Bluetooth:', error);
+      }
+    }
+  }
+
   async scanForDevices() {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       const devices = [];
+
+      // Initialize Bluetooth adapter first
+      await this.initializeBluetooth();
 
       // Wait for noble to be powered on
       if (noble.state !== 'poweredOn') {
@@ -112,7 +136,7 @@ class PrinterService {
           console.log('Scan timeout reached');
           noble.stopScanning();
           resolve(devices);
-        }, 10000); // Increased timeout to 10 seconds
+        }, 10000);
 
         noble.on('discover', (peripheral) => {
           console.log('Found device:', {
