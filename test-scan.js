@@ -8,49 +8,13 @@ async function initializeBluetooth() {
   if (process.platform === 'linux') {
     try {
       console.log('Initializing Bluetooth adapter...');
-      
-      // First try to reset the Bluetooth service
-      try {
-        console.log('Resetting Bluetooth service...');
-        await execAsync('sudo systemctl restart bluetooth');
-        // Wait for the service to restart
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      } catch (error) {
-        console.log('Error restarting Bluetooth service:', error.message);
-      }
-
-      // Use bluetoothctl to power cycle and set discoverable
-      try {
-        console.log('Configuring Bluetooth adapter...');
-        const commands = [
-          'power off',
-          'power on',
-          'discoverable on',
-          'pairable on',
-          'agent on',
-          'scan on'
-        ];
-
-        for (const cmd of commands) {
-          console.log(`Running bluetoothctl command: ${cmd}`);
-          await execAsync(`echo "${cmd}" | sudo bluetoothctl`);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-        console.log('Bluetooth adapter configured');
-      } catch (error) {
-        console.log('Error configuring adapter:', error.message);
-      }
-
-      // Verify the adapter is up using bluetoothctl
-      try {
-        const { stdout } = await execAsync('echo "show" | sudo bluetoothctl');
-        if (!stdout.includes('Powered: yes')) {
-          throw new Error('Adapter is not powered on after initialization');
-        }
-        console.log('Bluetooth adapter is up and running');
-      } catch (error) {
-        console.log('Error verifying adapter state:', error.message);
-      }
+      // Reset the Bluetooth adapter
+      await execAsync('sudo hciconfig hci0 reset');
+      // Set to piscan mode (page scan and inquiry scan)
+      await execAsync('sudo hciconfig hci0 piscan');
+      // Make sure the adapter is up
+      await execAsync('sudo hciconfig hci0 up');
+      console.log('Bluetooth adapter initialized');
     } catch (error) {
       console.error('Error initializing Bluetooth:', error);
     }
@@ -70,45 +34,45 @@ async function scanForDevices() {
       noble.once('stateChange', (state) => {
         if (state === 'poweredOn') {
           console.log('Bluetooth is ready, starting scan...');
-          startScan();
+          // On Ubuntu, we need to scan with allowDuplicates=true
+          const allowDuplicates = process.platform === 'linux';
+          console.log('Using allowDuplicates:', allowDuplicates);
+          startScan(allowDuplicates);
         } else {
           console.log('Bluetooth state:', state);
           reject(new Error('Bluetooth is not ready'));
         }
       });
     } else {
-      console.log('Bluetooth is ready, starting scan...');
-      startScan();
+      // On Ubuntu, we need to scan with allowDuplicates=true
+      const allowDuplicates = process.platform === 'linux';
+      console.log('Using allowDuplicates:', allowDuplicates);
+      startScan(allowDuplicates);
     }
 
-    function startScan() {
-      // Remove any existing listeners
-      noble.removeAllListeners('discover');
-      noble.removeAllListeners('scanStart');
-      noble.removeAllListeners('scanStop');
-      noble.removeAllListeners('warning');
-
+    function startScan(allowDuplicates) {
       const timeout = setTimeout(() => {
         console.log('Scan timeout reached');
         noble.stopScanning();
         console.log('Found devices:', devices);
         resolve(devices);
-      }, 30000); // Increased timeout to 30 seconds
+      }, 10000);
 
       noble.on('discover', (peripheral) => {
-        const deviceInfo = {
+        console.log('Found device:', {
           name: peripheral.advertisement.localName || 'Unknown',
           id: peripheral.id,
           address: peripheral.address,
           rssi: peripheral.rssi,
-          services: peripheral.advertisement.serviceUuids || [],
-          manufacturerData: peripheral.advertisement.manufacturerData ? 
-            peripheral.advertisement.manufacturerData.toString('hex') : null,
-          txPowerLevel: peripheral.advertisement.txPowerLevel,
-          connectable: peripheral.connectable
-        };
-        console.log('Found device:', deviceInfo);
-        devices.push(deviceInfo);
+          services: peripheral.advertisement.serviceUuids || []
+        });
+        devices.push({
+          name: peripheral.advertisement.localName,
+          id: peripheral.id,
+          address: peripheral.address,
+          rssi: peripheral.rssi,
+          services: peripheral.advertisement.serviceUuids
+        });
       });
 
       noble.on('scanStart', () => {
@@ -123,15 +87,9 @@ async function scanForDevices() {
         console.warn('Noble warning:', message);
       });
 
-      // Start scanning with all options enabled
-      noble.startScanningAsync([], true, true).catch(err => {
+      noble.startScanningAsync([], allowDuplicates).catch(err => {
         console.error('Error starting scan:', err);
         reject(err);
-      });
-
-      // Also start a bluetoothctl scan in parallel
-      execAsync('echo "scan on" | sudo bluetoothctl').catch(err => {
-        console.log('Error starting bluetoothctl scan:', err.message);
       });
     }
   });
