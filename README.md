@@ -169,4 +169,4 @@ The project uses:
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE)`
