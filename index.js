@@ -135,6 +135,7 @@ class PrinterService {
         const timeout = setTimeout(() => {
           console.log('Scan timeout reached');
           noble.stopScanning();
+          console.log('Found devices:', devices);
           resolve(devices);
         }, 10000);
 
@@ -143,7 +144,8 @@ class PrinterService {
             name: peripheral.advertisement.localName || 'Unknown',
             id: peripheral.id,
             address: peripheral.address,
-            rssi: peripheral.rssi
+            rssi: peripheral.rssi,
+            services: peripheral.advertisement.serviceUuids || []
           });
           devices.push({
             name: peripheral.advertisement.localName,
