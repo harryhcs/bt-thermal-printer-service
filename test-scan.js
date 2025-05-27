@@ -9,34 +9,54 @@ async function initializeBluetooth() {
     try {
       console.log('Initializing Bluetooth adapter...');
       
-      // First check if the adapter is up
+      // First try to reset the Bluetooth service
       try {
-        const { stdout } = await execAsync('hciconfig hci0');
-        if (stdout.includes('UP RUNNING')) {
-          console.log('Bluetooth adapter is already up');
-          return;
-        }
+        console.log('Resetting Bluetooth service...');
+        await execAsync('sudo systemctl restart bluetooth');
+        // Wait for the service to restart
+        await new Promise(resolve => setTimeout(resolve, 2000));
       } catch (error) {
-        console.log('Bluetooth adapter not found or not up');
+        console.log('Error restarting Bluetooth service:', error.message);
       }
 
-      // Try to bring the adapter up first
+      // Try to reset the adapter at the hardware level
+      try {
+        console.log('Resetting Bluetooth adapter...');
+        await execAsync('sudo btmgmt power off');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await execAsync('sudo btmgmt power on');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (error) {
+        console.log('Error resetting adapter:', error.message);
+      }
+
+      // Now try to bring up the adapter
       try {
         console.log('Bringing up Bluetooth adapter...');
         await execAsync('sudo hciconfig hci0 up');
-        // Wait a moment for the adapter to initialize
         await new Promise(resolve => setTimeout(resolve, 1000));
       } catch (error) {
         console.log('Error bringing up adapter:', error.message);
       }
 
-      // Now try to set piscan mode
+      // Finally set piscan mode
       try {
         console.log('Setting piscan mode...');
         await execAsync('sudo hciconfig hci0 piscan');
         console.log('Bluetooth adapter initialized');
       } catch (error) {
         console.log('Error setting piscan mode:', error.message);
+      }
+
+      // Verify the adapter is up
+      try {
+        const { stdout } = await execAsync('hciconfig hci0');
+        if (!stdout.includes('UP RUNNING')) {
+          throw new Error('Adapter is not up after initialization');
+        }
+        console.log('Bluetooth adapter is up and running');
+      } catch (error) {
+        console.log('Error verifying adapter state:', error.message);
       }
     } catch (error) {
       console.error('Error initializing Bluetooth:', error);
