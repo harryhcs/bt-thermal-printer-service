@@ -4,6 +4,7 @@ import iconv from 'iconv-lite';
 import fs from 'fs/promises';
 import path from 'path';
 import cors from 'cors';
+import os from 'os';
 
 const app = express();
 app.use(cors()); // Enable CORS for all routes
@@ -83,94 +84,45 @@ class PrinterService {
   async scanForDevices() {
     return new Promise((resolve, reject) => {
       const devices = [];
-      
-      console.log('Starting device scan...');
-      console.log('Current noble state:', noble.state);
 
-      // Initialize noble if not already initialized
-      if (!noble.state || noble.state === 'poweredOff') {
-        console.log('Noble not initialized, waiting for state change...');
-        noble.on('stateChange', (state) => {
-          console.log('Noble state changed to:', state);
+      // Wait for noble to be powered on
+      if (noble.state !== 'poweredOn') {
+        console.log('Waiting for Bluetooth to be ready...');
+        noble.once('stateChange', (state) => {
           if (state === 'poweredOn') {
-            console.log('Bluetooth is powered on, starting scan...');
-            // Try scanning with specific service UUIDs
-            noble.startScanningAsync([PRINTER_SERVICE], true)
-              .then(() => console.log('Scan started successfully'))
-              .catch(err => {
-                console.error('Error starting scan:', err);
-                // If specific service scan fails, try scanning all devices
-                console.log('Falling back to scanning all devices...');
-                return noble.startScanningAsync([], true);
-              })
-              .then(() => console.log('Fallback scan started successfully'))
-              .catch(err => {
-                console.error('Error starting fallback scan:', err);
-                reject(err);
-              });
+            console.log('Bluetooth is ready, starting scan...');
+            startScan();
           } else {
-            console.log('Bluetooth is not powered on:', state);
-            resolve(devices);
+            console.log('Bluetooth state:', state);
+            reject(new Error('Bluetooth is not ready'));
           }
         });
       } else {
-        console.log('Noble already initialized, starting scan...');
-        // Try scanning with specific service UUIDs
-        noble.startScanningAsync([PRINTER_SERVICE], true)
-          .then(() => console.log('Scan started successfully'))
-          .catch(err => {
-            console.error('Error starting scan:', err);
-            // If specific service scan fails, try scanning all devices
-            console.log('Falling back to scanning all devices...');
-            return noble.startScanningAsync([], true);
-          })
-          .then(() => console.log('Fallback scan started successfully'))
-          .catch(err => {
-            console.error('Error starting fallback scan:', err);
-            reject(err);
-          });
+        startScan();
       }
 
-      const timeout = setTimeout(() => {
-        console.log('Scan timeout reached after 15 seconds');
-        noble.stopScanning();
-        console.log('Found devices:', devices);
-        resolve(devices);
-      }, 15000); // Increased to 15 seconds
+      function startScan() {
+        const timeout = setTimeout(() => {
+          noble.stopScanning();
+          resolve(devices);
+        }, 5000);
 
-      noble.on('discover', (peripheral) => {
-        console.log('Discovered device:', {
-          name: peripheral.advertisement.localName || 'Unknown',
-          id: peripheral.id,
-          address: peripheral.address,
-          rssi: peripheral.rssi,
-          services: peripheral.advertisement.serviceUuids || []
-        });
-        
-        // Only add devices that have a name or are advertising services
-        if (peripheral.advertisement.localName || 
-            (peripheral.advertisement.serviceUuids && peripheral.advertisement.serviceUuids.length > 0)) {
+        noble.on('discover', (peripheral) => {
+          console.log('Found device:', peripheral.advertisement.localName);
           devices.push({
-            name: peripheral.advertisement.localName || 'Unknown',
+            name: peripheral.advertisement.localName,
             id: peripheral.id,
             address: peripheral.address,
             rssi: peripheral.rssi,
-            services: peripheral.advertisement.serviceUuids || []
+            services: peripheral.advertisement.serviceUuids
           });
-        }
-      });
+        });
 
-      noble.on('scanStart', () => {
-        console.log('Scan started');
-      });
-
-      noble.on('scanStop', () => {
-        console.log('Scan stopped');
-      });
-
-      noble.on('warning', (message) => {
-        console.warn('Noble warning:', message);
-      });
+        noble.startScanningAsync([], false).catch(err => {
+          console.error('Error starting scan:', err);
+          reject(err);
+        });
+      }
     });
   }
 
