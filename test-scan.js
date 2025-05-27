@@ -8,13 +8,36 @@ async function initializeBluetooth() {
   if (process.platform === 'linux') {
     try {
       console.log('Initializing Bluetooth adapter...');
-      // Reset the Bluetooth adapter
-      await execAsync('sudo hciconfig hci0 reset');
-      // Set to piscan mode (page scan and inquiry scan)
-      await execAsync('sudo hciconfig hci0 piscan');
-      // Make sure the adapter is up
-      await execAsync('sudo hciconfig hci0 up');
-      console.log('Bluetooth adapter initialized');
+      
+      // First check if the adapter is up
+      try {
+        const { stdout } = await execAsync('hciconfig hci0');
+        if (stdout.includes('UP RUNNING')) {
+          console.log('Bluetooth adapter is already up');
+          return;
+        }
+      } catch (error) {
+        console.log('Bluetooth adapter not found or not up');
+      }
+
+      // Try to bring the adapter up first
+      try {
+        console.log('Bringing up Bluetooth adapter...');
+        await execAsync('sudo hciconfig hci0 up');
+        // Wait a moment for the adapter to initialize
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (error) {
+        console.log('Error bringing up adapter:', error.message);
+      }
+
+      // Now try to set piscan mode
+      try {
+        console.log('Setting piscan mode...');
+        await execAsync('sudo hciconfig hci0 piscan');
+        console.log('Bluetooth adapter initialized');
+      } catch (error) {
+        console.log('Error setting piscan mode:', error.message);
+      }
     } catch (error) {
       console.error('Error initializing Bluetooth:', error);
     }
