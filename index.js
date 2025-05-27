@@ -83,12 +83,54 @@ class PrinterService {
   async scanForDevices() {
     return new Promise((resolve, reject) => {
       const devices = [];
+      
+      console.log('Starting device scan...');
+      console.log('Current noble state:', noble.state);
+
+      // Initialize noble if not already initialized
+      if (!noble.state || noble.state === 'poweredOff') {
+        console.log('Noble not initialized, waiting for state change...');
+        noble.on('stateChange', (state) => {
+          console.log('Noble state changed to:', state);
+          if (state === 'poweredOn') {
+            console.log('Bluetooth is powered on, starting scan...');
+            noble.startScanningAsync([], false)
+              .then(() => console.log('Scan started successfully'))
+              .catch(err => {
+                console.error('Error starting scan:', err);
+                reject(err);
+              });
+          } else {
+            console.log('Bluetooth is not powered on:', state);
+            resolve(devices);
+          }
+        });
+      } else {
+        console.log('Noble already initialized, starting scan...');
+        noble.startScanningAsync([], false)
+          .then(() => console.log('Scan started successfully'))
+          .catch(err => {
+            console.error('Error starting scan:', err);
+            reject(err);
+          });
+      }
+
       const timeout = setTimeout(() => {
+        console.log('Scan timeout reached after 10 seconds');
         noble.stopScanning();
+        console.log('Found devices:', devices);
         resolve(devices);
-      }, 5000);
+      }, 10000);
 
       noble.on('discover', (peripheral) => {
+        console.log('Discovered device:', {
+          name: peripheral.advertisement.localName,
+          id: peripheral.id,
+          address: peripheral.address,
+          rssi: peripheral.rssi,
+          services: peripheral.advertisement.serviceUuids
+        });
+        
         devices.push({
           name: peripheral.advertisement.localName,
           id: peripheral.id,
@@ -98,7 +140,17 @@ class PrinterService {
         });
       });
 
-      noble.startScanningAsync([], false).catch(reject);
+      noble.on('scanStart', () => {
+        console.log('Scan started');
+      });
+
+      noble.on('scanStop', () => {
+        console.log('Scan stopped');
+      });
+
+      noble.on('warning', (message) => {
+        console.warn('Noble warning:', message);
+      });
     });
   }
 
