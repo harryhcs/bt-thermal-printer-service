@@ -70,45 +70,45 @@ async function scanForDevices() {
       noble.once('stateChange', (state) => {
         if (state === 'poweredOn') {
           console.log('Bluetooth is ready, starting scan...');
-          // On Ubuntu, we need to scan with allowDuplicates=true
-          const allowDuplicates = process.platform === 'linux';
-          console.log('Using allowDuplicates:', allowDuplicates);
-          startScan(allowDuplicates);
+          startScan();
         } else {
           console.log('Bluetooth state:', state);
           reject(new Error('Bluetooth is not ready'));
         }
       });
     } else {
-      // On Ubuntu, we need to scan with allowDuplicates=true
-      const allowDuplicates = process.platform === 'linux';
-      console.log('Using allowDuplicates:', allowDuplicates);
-      startScan(allowDuplicates);
+      console.log('Bluetooth is ready, starting scan...');
+      startScan();
     }
 
-    function startScan(allowDuplicates) {
+    function startScan() {
+      // Remove any existing listeners
+      noble.removeAllListeners('discover');
+      noble.removeAllListeners('scanStart');
+      noble.removeAllListeners('scanStop');
+      noble.removeAllListeners('warning');
+
       const timeout = setTimeout(() => {
         console.log('Scan timeout reached');
         noble.stopScanning();
         console.log('Found devices:', devices);
         resolve(devices);
-      }, 10000);
+      }, 30000); // Increased timeout to 30 seconds
 
       noble.on('discover', (peripheral) => {
-        console.log('Found device:', {
+        const deviceInfo = {
           name: peripheral.advertisement.localName || 'Unknown',
           id: peripheral.id,
           address: peripheral.address,
           rssi: peripheral.rssi,
-          services: peripheral.advertisement.serviceUuids || []
-        });
-        devices.push({
-          name: peripheral.advertisement.localName,
-          id: peripheral.id,
-          address: peripheral.address,
-          rssi: peripheral.rssi,
-          services: peripheral.advertisement.serviceUuids
-        });
+          services: peripheral.advertisement.serviceUuids || [],
+          manufacturerData: peripheral.advertisement.manufacturerData ? 
+            peripheral.advertisement.manufacturerData.toString('hex') : null,
+          txPowerLevel: peripheral.advertisement.txPowerLevel,
+          connectable: peripheral.connectable
+        };
+        console.log('Found device:', deviceInfo);
+        devices.push(deviceInfo);
       });
 
       noble.on('scanStart', () => {
@@ -123,9 +123,15 @@ async function scanForDevices() {
         console.warn('Noble warning:', message);
       });
 
-      noble.startScanningAsync([], allowDuplicates).catch(err => {
+      // Start scanning with all options enabled
+      noble.startScanningAsync([], true, true).catch(err => {
         console.error('Error starting scan:', err);
         reject(err);
+      });
+
+      // Also start a bluetoothctl scan in parallel
+      execAsync('echo "scan on" | sudo bluetoothctl').catch(err => {
+        console.log('Error starting bluetoothctl scan:', err.message);
       });
     }
   });
