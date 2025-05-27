@@ -19,40 +19,33 @@ async function initializeBluetooth() {
         console.log('Error restarting Bluetooth service:', error.message);
       }
 
-      // Try to reset the adapter at the hardware level
+      // Use bluetoothctl to power cycle and set discoverable
       try {
-        console.log('Resetting Bluetooth adapter...');
-        await execAsync('sudo btmgmt power off');
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        await execAsync('sudo btmgmt power on');
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log('Configuring Bluetooth adapter...');
+        const commands = [
+          'power off',
+          'power on',
+          'discoverable on',
+          'pairable on',
+          'agent on',
+          'scan on'
+        ];
+
+        for (const cmd of commands) {
+          console.log(`Running bluetoothctl command: ${cmd}`);
+          await execAsync(`echo "${cmd}" | sudo bluetoothctl`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        console.log('Bluetooth adapter configured');
       } catch (error) {
-        console.log('Error resetting adapter:', error.message);
+        console.log('Error configuring adapter:', error.message);
       }
 
-      // Now try to bring up the adapter
+      // Verify the adapter is up using bluetoothctl
       try {
-        console.log('Bringing up Bluetooth adapter...');
-        await execAsync('sudo hciconfig hci0 up');
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      } catch (error) {
-        console.log('Error bringing up adapter:', error.message);
-      }
-
-      // Finally set piscan mode
-      try {
-        console.log('Setting piscan mode...');
-        await execAsync('sudo hciconfig hci0 piscan');
-        console.log('Bluetooth adapter initialized');
-      } catch (error) {
-        console.log('Error setting piscan mode:', error.message);
-      }
-
-      // Verify the adapter is up
-      try {
-        const { stdout } = await execAsync('hciconfig hci0');
-        if (!stdout.includes('UP RUNNING')) {
-          throw new Error('Adapter is not up after initialization');
+        const { stdout } = await execAsync('echo "show" | sudo bluetoothctl');
+        if (!stdout.includes('Powered: yes')) {
+          throw new Error('Adapter is not powered on after initialization');
         }
         console.log('Bluetooth adapter is up and running');
       } catch (error) {
