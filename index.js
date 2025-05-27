@@ -91,24 +91,36 @@ class PrinterService {
         noble.once('stateChange', (state) => {
           if (state === 'poweredOn') {
             console.log('Bluetooth is ready, starting scan...');
-            startScan();
+            // On Ubuntu, we need to scan with allowDuplicates=true
+            const allowDuplicates = process.platform === 'linux';
+            console.log('Using allowDuplicates:', allowDuplicates);
+            startScan(allowDuplicates);
           } else {
             console.log('Bluetooth state:', state);
             reject(new Error('Bluetooth is not ready'));
           }
         });
       } else {
-        startScan();
+        // On Ubuntu, we need to scan with allowDuplicates=true
+        const allowDuplicates = process.platform === 'linux';
+        console.log('Using allowDuplicates:', allowDuplicates);
+        startScan(allowDuplicates);
       }
 
-      function startScan() {
+      function startScan(allowDuplicates) {
         const timeout = setTimeout(() => {
+          console.log('Scan timeout reached');
           noble.stopScanning();
           resolve(devices);
-        }, 5000);
+        }, 10000); // Increased timeout to 10 seconds
 
         noble.on('discover', (peripheral) => {
-          console.log('Found device:', peripheral.advertisement.localName);
+          console.log('Found device:', {
+            name: peripheral.advertisement.localName || 'Unknown',
+            id: peripheral.id,
+            address: peripheral.address,
+            rssi: peripheral.rssi
+          });
           devices.push({
             name: peripheral.advertisement.localName,
             id: peripheral.id,
@@ -118,7 +130,19 @@ class PrinterService {
           });
         });
 
-        noble.startScanningAsync([], false).catch(err => {
+        noble.on('scanStart', () => {
+          console.log('Scan started');
+        });
+
+        noble.on('scanStop', () => {
+          console.log('Scan stopped');
+        });
+
+        noble.on('warning', (message) => {
+          console.warn('Noble warning:', message);
+        });
+
+        noble.startScanningAsync([], allowDuplicates).catch(err => {
           console.error('Error starting scan:', err);
           reject(err);
         });
