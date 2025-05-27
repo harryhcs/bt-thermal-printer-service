@@ -109,10 +109,13 @@ class PrinterService {
       // Initialize Bluetooth adapter first
       await this.initializeBluetooth();
 
+      // Create a new noble instance for this scan
+      const nobleInstance = new noble.constructor();
+      
       // Wait for noble to be powered on
-      if (noble.state !== 'poweredOn') {
+      if (nobleInstance.state !== 'poweredOn') {
         console.log('Waiting for Bluetooth to be ready...');
-        noble.once('stateChange', (state) => {
+        nobleInstance.once('stateChange', (state) => {
           if (state === 'poweredOn') {
             console.log('Bluetooth is ready, starting scan...');
             // On Ubuntu, we need to scan with allowDuplicates=true
@@ -134,12 +137,12 @@ class PrinterService {
       function startScan(allowDuplicates) {
         const timeout = setTimeout(() => {
           console.log('Scan timeout reached');
-          noble.stopScanning();
+          nobleInstance.stopScanning();
           console.log('Found devices:', devices);
           resolve(devices);
         }, 10000);
 
-        noble.on('discover', (peripheral) => {
+        nobleInstance.on('discover', (peripheral) => {
           console.log('Found device:', {
             name: peripheral.advertisement.localName || 'Unknown',
             id: peripheral.id,
@@ -156,19 +159,19 @@ class PrinterService {
           });
         });
 
-        noble.on('scanStart', () => {
+        nobleInstance.on('scanStart', () => {
           console.log('Scan started');
         });
 
-        noble.on('scanStop', () => {
+        nobleInstance.on('scanStop', () => {
           console.log('Scan stopped');
         });
 
-        noble.on('warning', (message) => {
+        nobleInstance.on('warning', (message) => {
           console.warn('Noble warning:', message);
         });
 
-        noble.startScanningAsync([], allowDuplicates).catch(err => {
+        nobleInstance.startScanningAsync([], allowDuplicates).catch(err => {
           console.error('Error starting scan:', err);
           reject(err);
         });
