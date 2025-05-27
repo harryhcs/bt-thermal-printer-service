@@ -94,10 +94,18 @@ class PrinterService {
           console.log('Noble state changed to:', state);
           if (state === 'poweredOn') {
             console.log('Bluetooth is powered on, starting scan...');
-            noble.startScanningAsync([], false)
+            // Try scanning with specific service UUIDs
+            noble.startScanningAsync([PRINTER_SERVICE], true)
               .then(() => console.log('Scan started successfully'))
               .catch(err => {
                 console.error('Error starting scan:', err);
+                // If specific service scan fails, try scanning all devices
+                console.log('Falling back to scanning all devices...');
+                return noble.startScanningAsync([], true);
+              })
+              .then(() => console.log('Fallback scan started successfully'))
+              .catch(err => {
+                console.error('Error starting fallback scan:', err);
                 reject(err);
               });
           } else {
@@ -107,37 +115,49 @@ class PrinterService {
         });
       } else {
         console.log('Noble already initialized, starting scan...');
-        noble.startScanningAsync([], false)
+        // Try scanning with specific service UUIDs
+        noble.startScanningAsync([PRINTER_SERVICE], true)
           .then(() => console.log('Scan started successfully'))
           .catch(err => {
             console.error('Error starting scan:', err);
+            // If specific service scan fails, try scanning all devices
+            console.log('Falling back to scanning all devices...');
+            return noble.startScanningAsync([], true);
+          })
+          .then(() => console.log('Fallback scan started successfully'))
+          .catch(err => {
+            console.error('Error starting fallback scan:', err);
             reject(err);
           });
       }
 
       const timeout = setTimeout(() => {
-        console.log('Scan timeout reached after 10 seconds');
+        console.log('Scan timeout reached after 15 seconds');
         noble.stopScanning();
         console.log('Found devices:', devices);
         resolve(devices);
-      }, 10000);
+      }, 15000); // Increased to 15 seconds
 
       noble.on('discover', (peripheral) => {
         console.log('Discovered device:', {
-          name: peripheral.advertisement.localName,
+          name: peripheral.advertisement.localName || 'Unknown',
           id: peripheral.id,
           address: peripheral.address,
           rssi: peripheral.rssi,
-          services: peripheral.advertisement.serviceUuids
+          services: peripheral.advertisement.serviceUuids || []
         });
         
-        devices.push({
-          name: peripheral.advertisement.localName,
-          id: peripheral.id,
-          address: peripheral.address,
-          rssi: peripheral.rssi,
-          services: peripheral.advertisement.serviceUuids
-        });
+        // Only add devices that have a name or are advertising services
+        if (peripheral.advertisement.localName || 
+            (peripheral.advertisement.serviceUuids && peripheral.advertisement.serviceUuids.length > 0)) {
+          devices.push({
+            name: peripheral.advertisement.localName || 'Unknown',
+            id: peripheral.id,
+            address: peripheral.address,
+            rssi: peripheral.rssi,
+            services: peripheral.advertisement.serviceUuids || []
+          });
+        }
       });
 
       noble.on('scanStart', () => {
